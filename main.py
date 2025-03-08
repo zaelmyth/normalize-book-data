@@ -16,6 +16,7 @@ def main():
 
     create_normalized_name_column(cursor_read, cursor_write)
     populate_normalized_name_column(cursor_read, cursor_write)
+    index_normalized_name_column(cursor_read, cursor_write)
 
     cursor_write.close()
     cursor_read.close()
@@ -77,6 +78,14 @@ def populate_normalized_name_column(cursor_read, cursor_write):
             "UPDATE authors SET normalized_name = %s WHERE id = %s",
             normalized_authors
         )
+
+
+def index_normalized_name_column(cursor_read, cursor_write):
+    cursor_read.execute("SHOW INDEXES FROM authors WHERE Column_name = 'normalized_name'")
+    normalized_name_index = cursor_read.fetchone()
+
+    if normalized_name_index is None:
+        cursor_write.execute("ALTER TABLE authors ADD INDEX normalized_name_index (normalized_name)")
 
 
 main()
