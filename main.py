@@ -14,21 +14,31 @@ def main():
     db_write = get_mysql_connection(config)
     cursor_write = db_write.cursor()
 
+    print("Creating normalized_name column...")
     create_normalized_name_column(cursor_read, cursor_write)
+
+    print("Populating normalized_name column...")
     populate_normalized_name_column(cursor_read, cursor_write)
+
+    print("Indexing normalized_name column...")
     index_normalized_name_column(cursor_read, cursor_write)
+
+    print("Merging duplicated authors...")
     duplicated_authors = get_duplicated_authors(cursor_read)
 
     for author in duplicated_authors:
         main_author_id = get_main_author_id(cursor_read, author["normalized_name"])
         merge_authors(cursor_read, cursor_write, author["normalized_name"], main_author_id)
 
+    print("Deleting normalized_name column...")
     delete_normalized_name_column(cursor_write)
 
     cursor_write.close()
     cursor_read.close()
     db_write.close()
     db_read.close()
+
+    print("Done!")
 
 
 def get_config():
@@ -145,4 +155,5 @@ def delete_normalized_name_column(cursor_write):
     cursor_write.execute("ALTER TABLE authors DROP COLUMN normalized_name")
 
 
-main()
+if __name__ == '__main__':
+    main()
