@@ -1,8 +1,7 @@
-import pymysql
-import pymysql.cursors
 import helpers.config
 import helpers.db
 import helpers.normalizer
+import pymysql.cursors
 
 
 def main():
