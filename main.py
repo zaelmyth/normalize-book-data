@@ -1,6 +1,7 @@
 import argparse
 import dotenv
-import mysql.connector
+import pymysql
+import pymysql.cursors
 import os
 import normalizer
 
@@ -9,10 +10,10 @@ def main():
     config = get_config()
 
     db_read = get_mysql_connection(config)
-    cursor_read = db_read.cursor(dictionary=True)
+    cursor_read = db_read.cursor(pymysql.cursors.DictCursor)
 
     db_write = get_mysql_connection(config)
-    cursor_write = db_write.cursor()
+    cursor_write = db_write.cursor(pymysql.cursors.SSCursor)
 
     print("Creating normalized_name column...")
     create_normalized_name_column(cursor_read, cursor_write)
@@ -45,14 +46,14 @@ def get_config():
     dotenv.load_dotenv()
 
     db_host = os.getenv("DB_HOST")
-    db_port = os.getenv("DB_PORT")
+    db_port = int(os.getenv("DB_PORT"))
     db_username = os.getenv("DB_USERNAME")
     db_password = os.getenv("DB_PASSWORD")
     db_name = os.getenv("DB_NAME")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--db-host", type=str, default=db_host, help="Database host")
-    parser.add_argument("--db-port", type=str, default=db_port, help="Database port")
+    parser.add_argument("--db-port", type=int, default=db_port, help="Database port")
     parser.add_argument("--db-username", type=str, default=db_username, help="Database username")
     parser.add_argument("--db-password", type=str, default=db_password, help="Database password")
     parser.add_argument("--db-name", type=str, default=db_name, help="Database name")
@@ -61,7 +62,7 @@ def get_config():
 
 
 def get_mysql_connection(config):
-    return mysql.connector.connect(
+    return pymysql.connect(
         host=config.db_host,
         port=config.db_port,
         user=config.db_username,
