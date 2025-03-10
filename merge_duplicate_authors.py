@@ -1,18 +1,17 @@
-import argparse
-import dotenv
 import pymysql
 import pymysql.cursors
-import os
-import normalizer
+import helpers.config
+import helpers.db
+import helpers.normalizer
 
 
 def main():
-    config = get_config()
+    config = helpers.config.get()
 
-    db_read = get_mysql_connection(config)
+    db_read = helpers.db.get(config)
     cursor_read = db_read.cursor(pymysql.cursors.DictCursor)
 
-    db_write = get_mysql_connection(config)
+    db_write = helpers.db.get(config)
     cursor_write = db_write.cursor(pymysql.cursors.SSCursor)
 
     print("Creating normalized_name column...")
@@ -42,36 +41,6 @@ def main():
     print("Done!")
 
 
-def get_config():
-    dotenv.load_dotenv()
-
-    db_host = os.getenv("DB_HOST")
-    db_port = int(os.getenv("DB_PORT"))
-    db_username = os.getenv("DB_USERNAME")
-    db_password = os.getenv("DB_PASSWORD")
-    db_name = os.getenv("DB_NAME")
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--db-host", type=str, default=db_host, help="Database host")
-    parser.add_argument("--db-port", type=int, default=db_port, help="Database port")
-    parser.add_argument("--db-username", type=str, default=db_username, help="Database username")
-    parser.add_argument("--db-password", type=str, default=db_password, help="Database password")
-    parser.add_argument("--db-name", type=str, default=db_name, help="Database name")
-
-    return parser.parse_args()
-
-
-def get_mysql_connection(config):
-    return pymysql.connect(
-        host=config.db_host,
-        port=config.db_port,
-        user=config.db_username,
-        password=config.db_password,
-        database=config.db_name,
-        autocommit=True,
-    )
-
-
 def create_normalized_name_column(cursor_read, cursor_write):
     cursor_read.execute("SHOW COLUMNS FROM authors WHERE Field = 'normalized_name'")
     normalized_name_column = cursor_read.fetchone()
@@ -89,7 +58,7 @@ def populate_normalized_name_column(cursor_read, cursor_write):
 
         normalized_authors = []
         for author in authors:
-            name = normalizer.Normalizer.normalize(author["name"])
+            name = helpers.normalizer.Normalizer.normalize(author["name"])
             normalized_authors.append((name, author["id"]))
 
         cursor_write.executemany(
