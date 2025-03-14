@@ -23,11 +23,7 @@ def main():
     index_normalized_name_column(cursor_read, cursor_write)
 
     print("Merging duplicated authors...")
-    duplicated_authors = get_duplicated_authors(cursor_read)
-
-    for author in duplicated_authors:
-        main_author_id = get_main_author_id(cursor_read, author["normalized_name"])
-        merge_authors(cursor_read, cursor_write, author["normalized_name"], main_author_id)
+    merge_duplicated_authors(cursor_write)
 
     print("Deleting normalized_name column...")
     delete_normalized_name_column(cursor_write)
@@ -74,32 +70,48 @@ def index_normalized_name_column(cursor_read, cursor_write):
         cursor_write.execute("ALTER TABLE authors ADD INDEX normalized_name_index (normalized_name)")
 
 
-def get_duplicated_authors(cursor_read):
-    cursor_read.execute("""
-        SELECT normalized_name, COUNT(*) AS count
+def merge_duplicated_authors(cursor_write):
+    cursor_write.execute("DROP TABLE IF EXISTS authors_duplicates")
+    cursor_write.execute("DROP TABLE IF EXISTS authors_main")
+
+    cursor_write.execute("""
+        CREATE TABLE authors_duplicates AS
+        SELECT normalized_name, GROUP_CONCAT(name SEPARATOR '|||') AS names
         FROM authors
         GROUP BY normalized_name
-        HAVING count > 1;
+        HAVING COUNT(*) > 1
     """)
 
-    return cursor_read.fetchall()
+    cursor_write.execute("""
+        CREATE TABLE authors_main AS
+        SELECT
+            ad.normalized_name,
+            (
+                SELECT a2.id
+                FROM authors a2
+                LEFT JOIN author_book ab2 ON a2.id = ab2.author_id
+                WHERE a2.normalized_name = ad.normalized_name
+                GROUP BY a2.id
+                ORDER BY COUNT(ab2.author_id) DESC, a2.id ASC
+                LIMIT 1
+            ) AS main_author_id
+        FROM authors_duplicates ad
+    """)
 
+    cursor_write.execute("""
+        UPDATE author_book ab
+        JOIN authors a ON ab.author_id = a.id
+        JOIN authors_main am ON a.normalized_name = am.normalized_name
+        SET ab.author_id = am.main_author_id
+        WHERE ab.author_id != am.main_author_id
+    """)
 
-def get_main_author_id(cursor_read, normalized_name):
-    cursor_read.execute(
-        """
-            SELECT author_book.author_id, COUNT(*) AS books_count
-            FROM authors
-            LEFT JOIN author_book ON author_book.author_id = authors.id
-            WHERE authors.normalized_name = %s
-            GROUP BY author_book.author_id
-            ORDER BY books_count DESC, author_book.author_id ASC
-            LIMIT 1
-        """,
-        [normalized_name],
-    )
-
-    return cursor_read.fetchone()["author_id"]
+    cursor_write.execute("""
+        DELETE a
+        FROM authors a
+        JOIN authors_main am ON a.normalized_name = am.normalized_name
+        WHERE a.id != am.main_author_id
+    """)
 
 
 def merge_authors(cursor_read, cursor_write, normalized_name, main_author_id):
