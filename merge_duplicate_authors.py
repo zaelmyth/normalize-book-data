@@ -45,7 +45,7 @@ def create_normalized_name_column(cursor_read, cursor_write):
 
 
 def populate_normalized_name_column(cursor_read, cursor_write):
-    cursor_read.execute("SELECT * FROM authors order by id asc")
+    cursor_read.execute("SELECT * FROM authors WHERE normalized_name IS NULL ORDER BY id ASC")
     while True:
         authors = cursor_read.fetchmany(1000)
         if not authors:
