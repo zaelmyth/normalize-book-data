@@ -18,7 +18,8 @@ def main():
         subjects = get_subjects_to_split(cursor_read, separator)
 
         print(f"Splitting {len(subjects)} subjects with separator '{separator}'...")
-        for subject in subjects:
+        for i, subject in enumerate(subjects):
+            print(f"Splitting subject '{subject['name']}' {i+1}/{len(subjects)}...")
             split_subject(cursor_read, cursor_write, subject, separator)
 
     # todo: for the following functions we should check if the resulting subject already exists instead of ignoring the
