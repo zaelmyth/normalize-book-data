@@ -19,7 +19,7 @@ def main():
     print("Populating normalized_name column...")
     populate_normalized_name_column(cursor_read, cursor_write)
 
-    print("Indexing normalized_name column...")
+    print("Indexing normalized_name column in authors table...")
     index_normalized_name_column(cursor_read, cursor_write)
 
     print("Merging duplicated authors...")
@@ -58,7 +58,7 @@ def populate_normalized_name_column(cursor_read, cursor_write):
 
         cursor_write.executemany(
             "UPDATE authors SET normalized_name = %s WHERE id = %s",
-            normalized_authors
+            normalized_authors,
         )
 
 
@@ -71,9 +71,13 @@ def index_normalized_name_column(cursor_read, cursor_write):
 
 
 def merge_duplicated_authors(cursor_write):
+    print("Dropping old tables...")
     cursor_write.execute("DROP TABLE IF EXISTS authors_duplicates")
     cursor_write.execute("DROP TABLE IF EXISTS authors_main")
 
+    print("Creating authors_duplicates table...")
+    cursor_write.execute(
+        "SET SESSION group_concat_max_len = 1000000;")  # needed to avoid length error when there are many authors
     cursor_write.execute("""
         CREATE TABLE authors_duplicates AS
         SELECT normalized_name, GROUP_CONCAT(name SEPARATOR '|||') AS names
@@ -81,55 +85,59 @@ def merge_duplicated_authors(cursor_write):
         GROUP BY normalized_name
         HAVING COUNT(*) > 1
     """)
+    cursor_write.execute("CREATE INDEX idx_authors_duplicates_normalized_name ON authors_duplicates(normalized_name)")
 
+    print("Creating tmp_author_counts table...")
+    cursor_write.execute("""
+        CREATE TEMPORARY TABLE tmp_author_counts AS
+        SELECT a.id, a.normalized_name, COUNT(ab.author_id) AS book_count
+        FROM authors a
+        LEFT JOIN author_book ab ON a.id = ab.author_id
+        GROUP BY a.id, a.normalized_name
+    """)
+    cursor_write.execute("CREATE INDEX idx_tmp_author_counts_normalized_name ON tmp_author_counts(normalized_name)")
+
+    print("Creating tmp_ranked_authors table...")
+    cursor_write.execute("""
+        CREATE TEMPORARY TABLE tmp_ranked_authors AS
+        SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY normalized_name
+            ORDER BY book_count DESC, id ASC
+        ) AS rn
+        FROM tmp_author_counts;
+    """)
+
+    print("Creating authors_main table...")
     cursor_write.execute("""
         CREATE TABLE authors_main AS
-        SELECT
-            ad.normalized_name,
-            (
-                SELECT a2.id
-                FROM authors a2
-                LEFT JOIN author_book ab2 ON a2.id = ab2.author_id
-                WHERE a2.normalized_name = ad.normalized_name
-                GROUP BY a2.id
-                ORDER BY COUNT(ab2.author_id) DESC, a2.id ASC
-                LIMIT 1
-            ) AS main_author_id
+        SELECT ad.normalized_name, ra.id AS main_author_id
         FROM authors_duplicates ad
+        INNER JOIN tmp_ranked_authors ra ON ad.normalized_name = ra.normalized_name
+        WHERE ra.rn = 1
     """)
 
+    print("Indexing normalized_name column in authors_main table...")
+    cursor_write.execute("ALTER TABLE authors_main ADD INDEX normalized_name_main_index (normalized_name)")
+
+    print("Updating author_book table...")
     cursor_write.execute("""
         UPDATE author_book ab
-        JOIN authors a ON ab.author_id = a.id
-        JOIN authors_main am ON a.normalized_name = am.normalized_name
-        SET ab.author_id = am.main_author_id
-        WHERE ab.author_id != am.main_author_id
+        JOIN (
+            SELECT a.id AS duplicate_id, am.main_author_id
+            FROM authors a
+            JOIN authors_main am ON a.normalized_name = am.normalized_name
+            WHERE a.id != am.main_author_id
+        ) AS authors_map ON ab.author_id = authors_map.duplicate_id
+        SET ab.author_id = authors_map.main_author_id;
     """)
 
+    print("Deleting duplicated authors...")
     cursor_write.execute("""
         DELETE a
         FROM authors a
         JOIN authors_main am ON a.normalized_name = am.normalized_name
         WHERE a.id != am.main_author_id
     """)
-
-
-def merge_authors(cursor_read, cursor_write, normalized_name, main_author_id):
-    cursor_read.execute(
-        "SELECT id FROM authors WHERE normalized_name = %s AND id != %s",
-        [normalized_name, main_author_id],
-    )
-    authors = cursor_read.fetchall()
-
-    cursor_write.executemany(
-        "UPDATE author_book SET author_id = %s WHERE author_id = %s",
-        [(main_author_id, author["id"]) for author in authors]
-    )
-
-    cursor_write.execute(
-        "DELETE FROM authors WHERE normalized_name = %s AND id != %s",
-        [normalized_name, main_author_id],
-    )
 
 
 def delete_normalized_name_column(cursor_write):
