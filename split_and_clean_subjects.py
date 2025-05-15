@@ -13,6 +13,21 @@ def main():
     db_write = helpers.db.get(config)
     cursor_write = db_write.cursor(pymysql.cursors.SSCursor)
 
+    print("Creating indexes...")
+    create_subject_indexes(cursor_read, cursor_write)
+
+    # todo: for the following functions we should check if the resulting subject already exists instead of ignoring the
+    #  duplicate name error
+
+    print("Trimming spaces...")
+    trim_spaces(cursor_write)
+
+    print("Capitalizing first letters...")
+    capitalize_first_letters(cursor_write)
+
+    print("Removing ending periods...")
+    remove_ending_periods(cursor_write)
+
     for separator in ["--", "->", " / "]:
         print(f"Getting subjects to split with separator '{separator}'...")
         subjects = get_subjects_to_split(cursor_read, separator)
@@ -22,24 +37,24 @@ def main():
             print(f"Splitting subject '{subject['name']}' {i+1}/{len(subjects)}...")
             split_subject(cursor_read, cursor_write, subject, separator)
 
-    # todo: for the following functions we should check if the resulting subject already exists instead of ignoring the
-    #  duplicate name error
-
-    print("Capitalizing first letters...")
-    capitalize_first_letters(cursor_write)
-
-    print("Removing ending periods...")
-    remove_ending_periods(cursor_write)
-
-    print("Trimming spaces...")
-    trim_spaces(cursor_write)
-
     cursor_write.close()
     cursor_read.close()
     db_write.close()
     db_read.close()
 
     print("Done!")
+
+
+def create_subject_indexes(cursor_read, cursor_write):
+    cursor_read.execute("SHOW INDEXES FROM subjects WHERE Column_name = 'name'")
+    name_index = cursor_read.fetchone()
+    if name_index is None:
+        cursor_write.execute("ALTER TABLE subjects ADD INDEX name_index (name)")
+
+    cursor_read.execute("SHOW INDEXES FROM book_subject WHERE Column_name = 'subject_id'")
+    subject_id_index = cursor_read.fetchone()
+    if subject_id_index is None:
+        cursor_write.execute("ALTER TABLE book_subject ADD INDEX subject_id_index (subject_id)")
 
 
 def get_subjects_to_split(cursor_read, separator):
@@ -49,13 +64,14 @@ def get_subjects_to_split(cursor_read, separator):
 
 
 def split_subject(cursor_read, cursor_write, subject, separator):
-    new_subjects = [sub.strip() for sub in subject["name"].split(separator)]
+    new_subjects = [sub.rstrip('.').strip().capitalize() for sub in subject["name"].split(separator)]
+    new_subjects = list(dict.fromkeys(new_subjects)) # remove duplicates
 
     placeholders = ", ".join(["%s"] * len(new_subjects))
     cursor_read.execute(f"SELECT id, name FROM subjects WHERE name IN ({placeholders})", new_subjects)
     subject_ids = {row["name"]: row["id"] for row in cursor_read.fetchall()}
 
-    subjects_to_insert = [sub for sub in new_subjects if sub not in subject_ids]
+    subjects_to_insert = [sub for sub in new_subjects if sub not in subject_ids and sub != ""]
     if subjects_to_insert:
         cursor_write.executemany("INSERT INTO subjects (name) VALUES (%s)", [(sub,) for sub in subjects_to_insert])
 
